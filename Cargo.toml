@@ -6,3 +6,5 @@ authors = ["jesuscript <konstantin.k.ed@gmail.com>"]
 [dependencies]
 nalgebra = "0.16.8"
 mnist = "0.4.0"
+rand = "0.5.5"
+
