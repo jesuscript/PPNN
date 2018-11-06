@@ -21,7 +21,10 @@ fn main() {
   // let training_data = mnist_training_data::TrainingData::new(10,28,28);
   let network = Network::new(&[2,3,2]);
   println!("{}", network);
+  //println!("{:?}", network.backprop());
 
   //println!("{}", network.feedforward_step(&DVector::<f32>::from_row_slice(2 as usize, &[10.0,-1.0]), 0 as usize))
   //println!("{}", network.feedforward(&DVector::<f32>::from_row_slice(2 as usize, &[10.0,-1.0])));
+
+  //println!("{}", &DMatrix::<f32>::zeros(3 as usize, 2 as usize));
 }

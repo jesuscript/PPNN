@@ -5,25 +5,25 @@ use rand::distributions::StandardNormal;
 
 
 pub struct Network {
-  input_size: u16,
+  input_size: usize,
   num_layers: usize,
-  sizes: DVector<u16>,
+  sizes: DVector<usize>,
   biases: Vec<DVector<f32>>,
   weights: Vec<DMatrix<f32>>
 }
 
 impl Network {
-  pub fn new(s:&[u16]) -> Network {
-    let sizes = DVector::<u16>::from_row_slice(s.len() as usize, s);
+  pub fn new(s:&[usize]) -> Network {
+    let sizes = DVector::<usize>::from_row_slice(s.len() as usize, s);
     
     let mut biases = vec![];
     let mut weights = vec![];
 
     for (i, size) in sizes.iter().skip(1).enumerate() {
       //biases.push(DMatrix::<f32>::new_random(*size as usize,1));
-      biases.push(DVector::<f32>::from_fn(*size as usize, |r, c| rng() ));
+      biases.push(DVector::<f32>::from_fn(*size, |r, c| rng() ));
 
-      weights.push(DMatrix::<f32>::from_fn(*size as usize,sizes[i] as usize, |r,c| rng() ));
+      weights.push(DMatrix::<f32>::from_fn(*size,sizes[i], |r,c| rng() ));
     }
 
     Network{
@@ -38,7 +38,7 @@ impl Network {
   fn feedforward_step(&self, a:&DVector<f32>, layer: usize) -> DVector<f32>{
     let (w,b) = (&self.weights[layer], &self.biases[layer]);
 
-    DVector::<f32>::from_fn(self.sizes[layer] as usize, |r, c| sigmoid(w.row(r).transpose().dot(&a) + b[r]))
+    DVector::<f32>::from_fn(self.sizes[layer], |r, c| sigmoid(w.row(r).transpose().dot(&a) + b[r]))
   }
   
   fn feedforward(&self, input:&DVector<f32>) -> DVector<f32>{
@@ -49,6 +49,33 @@ impl Network {
     }
     
     return a
+  }
+
+  pub fn backprop(&self, input:&DVector<f32>, output:&DVector<f32>) -> (Vec<DVector<f32>>, Vec<DMatrix<f32>>) {
+    let mut nabla_b = vec![];
+    let mut nabla_w = vec![];
+
+    for layer in 0..self.num_layers {
+      nabla_b.push(DVector::<f32>::zeros(self.biases[layer].nrows()));
+      nabla_w.push(DMatrix::<f32>::zeros(self.weights[layer].nrows(), self.weights[layer].ncols()))
+    }
+
+    let mut activation = input;
+
+    let mut activations = vec![activation];
+    let mut zs = vec![];
+
+    for layer in 0..self.num_layers {
+      let z = DVector::<f32>::from_fn(self.sizes[layer], |r,c| w.row(r).transpose().dot(&activation) + b[r]);
+      zs.push(z);
+
+      activation = sigmoid(z);
+      activations.push(activation);
+    }
+
+    
+
+    return (nabla_b,nabla_w)
   }
 }
 
@@ -76,8 +103,16 @@ impl Display for Network {
 }
 
 
-fn sigmoid(z:f32) -> f32{
+fn sigmoid(z:f32) -> f32 {
   1.0 / (1.0 + std::f32::consts::E.powf(-z))
+}
+
+fn sigmoid_prime(z:f32) -> f32 {
+  sigmoid(z) * (1.0 - sigmoid(z))
+}
+
+fn cost_derivative(out_activations:&DVector<f32>, target_out:&DVector<f32>) -> DVector<f32> {
+  out_activations - target_out
 }
 
 fn rng() -> f32 {
@@ -92,6 +127,6 @@ mod test {
   #[test]
   fn sigmoid_test() {
     assert_eq!((sigmoid(0.0), sigmoid(1.0), sigmoid(-1.0)),
-                (       0.5,          0.7310586,    0.26894143));
+               (       0.5,          0.7310586,    0.26894143));
   }
 }
