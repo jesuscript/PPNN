@@ -23,5 +23,5 @@ fn main() {
   println!("{}", network);
 
   //println!("{}", network.feedforward_step(&DVector::<f32>::from_row_slice(2 as usize, &[10.0,-1.0]), 0 as usize))
-  println!("{}", network.feedforward(DVector::<f32>::from_row_slice(2 as usize, &[10.0,-1.0])))
+  //println!("{}", network.feedforward(&DVector::<f32>::from_row_slice(2 as usize, &[10.0,-1.0])));
 }

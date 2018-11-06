@@ -35,16 +35,17 @@ impl Network {
     }
   }
 
-  fn feedforward_step(&self, a:DVector<f32>, layer: usize) -> DVector<f32>{
+  fn feedforward_step(&self, a:&DVector<f32>, layer: usize) -> DVector<f32>{
     let (w,b) = (&self.weights[layer], &self.biases[layer]);
 
     DVector::<f32>::from_fn(self.sizes[layer] as usize, |r, c| sigmoid(w.row(r).transpose().dot(&a) + b[r]))
   }
   
-  pub fn feedforward(&self, a: DVector<f32>) -> DVector<f32>{
-    let mut a = a;
-    for layer in 0..self.num_layers {
-      a = self.feedforward_step(a,layer);
+  fn feedforward(&self, input:&DVector<f32>) -> DVector<f32>{
+    let mut a = self.feedforward_step(input,0);
+    
+    for layer in 1..self.num_layers {
+      a = self.feedforward_step(&a,layer);
     }
     
     return a
