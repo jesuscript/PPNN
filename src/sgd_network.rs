@@ -1,4 +1,5 @@
 use std::fmt::{self,Display, Formatter};
+use std::borrow::Cow;
 use na::{DVector,Vector,Vector3,DMatrix,Dynamic,Matrix,MatrixMN};
 use rand::prelude::*;
 use rand::distributions::StandardNormal;
@@ -10,6 +11,11 @@ pub struct Network {
   sizes: DVector<usize>,
   biases: Vec<DVector<f32>>,
   weights: Vec<DMatrix<f32>>
+}
+
+struct TrainItem {
+  pub input: DVector<f32>,
+  pub output: DVector<f32>
 }
 
 impl Network {
@@ -35,48 +41,75 @@ impl Network {
     }
   }
 
-  fn feedforward_step(&self, a:&DVector<f32>, layer: usize) -> DVector<f32>{
+  fn weighted_inputs(&self, a:&DVector<f32>, layer: usize) -> DVector<f32>{
     let (w,b) = (&self.weights[layer], &self.biases[layer]);
 
-    DVector::<f32>::from_fn(self.sizes[layer], |r, c| sigmoid(w.row(r).transpose().dot(&a) + b[r]))
+    DVector::<f32>::from_fn(self.sizes[layer], |r, c| (w.row(r).transpose().dot(&a) + b[r]).sigmoid())
   }
   
   fn feedforward(&self, input:&DVector<f32>) -> DVector<f32>{
-    let mut a = self.feedforward_step(input,0);
+    let mut a = self.weighted_inputs(input,0).sigmoid();
     
     for layer in 1..self.num_layers {
-      a = self.feedforward_step(&a,layer);
+      a = self.weighted_inputs(&a,layer).sigmoid();
     }
     
     return a
   }
 
-  pub fn backprop(&self, input:&DVector<f32>, output:&DVector<f32>) -> (Vec<DVector<f32>>, Vec<DMatrix<f32>>) {
+  fn update_mini_batch(&self, mini_batch: &[TrainItem], eta: f32){
     let mut nabla_b = vec![];
     let mut nabla_w = vec![];
-
+    
     for layer in 0..self.num_layers {
       nabla_b.push(DVector::<f32>::zeros(self.biases[layer].nrows()));
       nabla_w.push(DMatrix::<f32>::zeros(self.weights[layer].nrows(), self.weights[layer].ncols()))
     }
 
-    let mut activation = input;
+    for t in mini_batch {
+      let (delta_nabla_b, delta_nabla_w) = self.backprop(&t.input,&t.output);
 
-    let mut activations = vec![activation];
+      for l in 0..self.num_layers {
+        nabla_b[l] = &nabla_b[l] + &delta_nabla_b[l];
+        nabla_w[l] = &nabla_w[l] + &delta_nabla_w[l];
+      }
+    }
+
+    //self.weights
+  }
+
+  fn backprop(&self, input:&DVector<f32>, output:&DVector<f32>) -> (Vec<DVector<f32>>, Vec<DMatrix<f32>>) {
+    let mut deltas = vec![]; // nabla_b === deltas
+    let mut nabla_w = vec![];
+
+
+    let mut activations = vec![input.clone()];
     let mut zs = vec![];
 
     for layer in 0..self.num_layers {
-      let z = DVector::<f32>::from_fn(self.sizes[layer], |r,c| w.row(r).transpose().dot(&activation) + b[r]);
+      let z = self.weighted_inputs(&activations[layer], layer);
+      
+      activations.push(z.sigmoid());
       zs.push(z);
-
-      activation = sigmoid(z);
-      activations.push(activation);
     }
 
+    let delta:DVector<f32> = cost_derivative(&activations[self.num_layers], output) *
+      zs[self.num_layers-1].sigmoid_prime(); 
     
+    nabla_w.insert(0,delta_from_upper_layer(&delta, &activations[self.num_layers - 1]));
+    deltas.insert(0,delta);
 
-    return (nabla_b,nabla_w)
+    for l in (0..(self.num_layers - 2)).rev() {
+      let sp = zs[l].sigmoid_prime();
+      let delta = DVector::<f32>::from_fn(self.sizes[l], |r,c| self.weights[l+1].column(r).dot(&deltas[0])*sp[r]);
+
+      nabla_w.insert(0,delta_from_upper_layer(&delta,&activations[l]));
+      deltas.insert(0,delta);
+    }
+
+    return (deltas,nabla_w)
   }
+
 }
 
 impl Display for Network {
@@ -102,13 +135,23 @@ impl Display for Network {
   }
 }
 
-
-fn sigmoid(z:f32) -> f32 {
-  1.0 / (1.0 + std::f32::consts::E.powf(-z))
+trait Sigmoid {
+  fn sigmoid(&self) -> Self;
+  fn sigmoid_prime(&self) -> Self;
 }
 
-fn sigmoid_prime(z:f32) -> f32 {
-  sigmoid(z) * (1.0 - sigmoid(z))
+impl Sigmoid for f32 {
+  fn sigmoid(&self) -> f32 { 1.0 / (1.0 + std::f32::consts::E.powf(-self)) }
+  fn sigmoid_prime(&self) -> f32 { self.sigmoid() * (1.0 - self.sigmoid()) }
+}
+
+impl Sigmoid for DVector<f32> {
+  fn sigmoid(&self) -> DVector<f32> { self.map(|em| em.sigmoid()) }
+  fn sigmoid_prime(&self) -> DVector<f32> { self.map(|em| em.sigmoid_prime()) }
+}
+
+fn delta_from_upper_layer(delta:&DVector<f32>, a:&DVector<f32>) -> DMatrix<f32> {
+  DMatrix::<f32>::from_fn(delta.nrows(), a.nrows(), |r,c| delta[r] * a[c])
 }
 
 fn cost_derivative(out_activations:&DVector<f32>, target_out:&DVector<f32>) -> DVector<f32> {
