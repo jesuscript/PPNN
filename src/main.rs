@@ -40,6 +40,12 @@ fn main() {
     println!("{},{}", x, y);
   }
 
+  let v3 = DVector::<f32>::from_row_slice(6 as usize, &[0.1,0.2,0.3,0.4,0.3,0.2]);
+
+  println!("{}", v3.imax());
+
+  println!("{}", if 1==2  {1} else {0});
+
   // let v3:Vec<f32> = v1.iter().zip(v2.iter()).map(|(x,y)| x+y).collect();
 
   // println!("{:?}", v3);

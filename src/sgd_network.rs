@@ -59,7 +59,14 @@ impl Network {
     return a
   }
 
-  fn sgd(&mut self, mut training_data: Vec<(DVector<f32>,DVector<f32>)>, epochs:u16, mini_batch_size:usize, eta:f32){
+  fn sgd(&mut self, mut training_data: Vec<(DVector<f32>,DVector<f32>)>, epochs:u16, mini_batch_size:usize, eta:f32,
+         test_data:Option<&[(DVector<f32>,DVector<f32>)]>) {
+    let mut test_n =0;
+    
+    if test_data.is_some(){
+      test_n = test_data.unwrap().len();
+    }
+    
     let n = training_data.len();
 
     for i in 0..epochs {
@@ -67,6 +74,12 @@ impl Network {
 
       for mini_batch in training_data.chunks(mini_batch_size){
         self.update_mini_batch(&mini_batch, eta);
+      }
+
+      if test_data.is_some(){
+        println!("Epoch {}: {}/{}", i, self.evaluate(test_data.unwrap()), test_n);
+      }else{
+        println!("Epoch {} complete", i);
       }
     }
   }
@@ -125,6 +138,13 @@ impl Network {
     return (deltas,nabla_w)
   }
 
+  fn evaluate(&self, test_data: &[(DVector<f32>,DVector<f32>)]) -> i32{
+    test_data.iter().fold(0, |sum, (input,output)| if self.feedforward(input).imax() == output.imax() {
+      sum+1
+    } else {
+      sum
+    })
+  }
 }
 
 impl Display for Network {
