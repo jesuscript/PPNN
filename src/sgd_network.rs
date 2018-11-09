@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use na::{DVector,Vector,Vector3,DMatrix,Dynamic,Matrix,MatrixMN};
 use rand::prelude::*;
 use rand::distributions::StandardNormal;
+use rand::{thread_rng, Rng};
 
 
 pub struct Network {
@@ -13,7 +14,7 @@ pub struct Network {
   weights: Vec<DMatrix<f32>>
 }
 
-struct TrainItem {
+pub struct TrainItem {
   pub input: DVector<f32>,
   pub output: DVector<f32>
 }
@@ -48,6 +49,7 @@ impl Network {
   }
   
   fn feedforward(&self, input:&DVector<f32>) -> DVector<f32>{
+    //try using fold over layers
     let mut a = self.weighted_inputs(input,0).sigmoid();
     
     for layer in 1..self.num_layers {
@@ -57,7 +59,19 @@ impl Network {
     return a
   }
 
-  fn update_mini_batch(&self, mini_batch: &[TrainItem], eta: f32){
+  fn sgd(&mut self, mut training_data: Vec<(DVector<f32>,DVector<f32>)>, epochs:u16, mini_batch_size:usize, eta:f32){
+    let n = training_data.len();
+
+    for i in 0..epochs {
+      thread_rng().shuffle(&mut training_data);
+
+      for mini_batch in training_data.chunks(mini_batch_size){
+        self.update_mini_batch(&mini_batch, eta);
+      }
+    }
+  }
+
+  fn update_mini_batch(&mut self, mini_batch: &[(DVector<f32>,DVector<f32>)], eta: f32){
     let mut nabla_b = vec![];
     let mut nabla_w = vec![];
     
@@ -66,16 +80,17 @@ impl Network {
       nabla_w.push(DMatrix::<f32>::zeros(self.weights[layer].nrows(), self.weights[layer].ncols()))
     }
 
-    for t in mini_batch {
-      let (delta_nabla_b, delta_nabla_w) = self.backprop(&t.input,&t.output);
+    for (input,output) in mini_batch {
+      let (delta_nabla_b, delta_nabla_w) = self.backprop(&input,&output);
 
-      for l in 0..self.num_layers {
-        nabla_b[l] = &nabla_b[l] + &delta_nabla_b[l];
-        nabla_w[l] = &nabla_w[l] + &delta_nabla_w[l];
-      }
+      nabla_b = nabla_b.iter().zip(delta_nabla_b.iter()).map(|(nb,dnb)| nb+dnb).collect();
+      nabla_w = nabla_w.iter().zip(delta_nabla_w.iter()).map(|(nw,dnw)| nw+dnw).collect();
     }
 
-    //self.weights
+    let k = eta/ mini_batch.len() as f32;
+
+    self.weights = self.weights.iter().zip(nabla_w.iter()).map(|(w,nw)| w - k*nw).collect();
+    self.biases = self.biases.iter().zip(nabla_b.iter()).map(|(b,nb)| b - k*nb).collect();
   }
 
   fn backprop(&self, input:&DVector<f32>, output:&DVector<f32>) -> (Vec<DVector<f32>>, Vec<DMatrix<f32>>) {

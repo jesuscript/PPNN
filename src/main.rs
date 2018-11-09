@@ -11,7 +11,6 @@ mod sgd_network;
 
 use sgd_network::{Network};
 
-
 use na::{DVector,Vector,Vector3,DMatrix,Dynamic,Matrix,MatrixMN};
 
 fn main() {
@@ -37,7 +36,28 @@ fn main() {
     10.0,20.0,30.0
   ]);
 
-  println!("{}", v1+v2);
+  for (x,y) in v1.iter().zip(v2.iter()){
+    println!("{},{}", x, y);
+  }
+
+  // let v3:Vec<f32> = v1.iter().zip(v2.iter()).map(|(x,y)| x+y).collect();
+
+  // println!("{:?}", v3);
+
+  // let n = 10;
+
+  // let vec: Vec<u32> = (0..n).collect();
+  
+  // thread_rng().shuffle(&mut vec);
+
+  // println!("{:?}", vec);
+
+
+  // for c in vec.chunks(3){
+  //   println!("chunk: {:?}", c);
+  // }
+
+
   //println!("{}", DMatrix::<f32>::from_fn(v1.nrows(), v2.nrows(), |r,c| v1.get());
 
 }
