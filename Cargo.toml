@@ -7,4 +7,8 @@ authors = ["jesuscript <konstantin.k.ed@gmail.com>"]
 nalgebra = "0.16.8"
 mnist = "0.4.0"
 rand = "0.5.5"
+itertools = "0.7.8"
+elapsed = "0.1.2"
 
+[profile.dev]
+opt-level = 3

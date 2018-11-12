@@ -4,7 +4,7 @@ use na::{DVector,Vector,Vector3,DMatrix,Dynamic,Matrix,MatrixMN};
 use rand::prelude::*;
 use rand::distributions::StandardNormal;
 use rand::{thread_rng, Rng};
-
+use itertools::Itertools;
 
 pub struct Network {
   input_size: usize,
@@ -59,8 +59,8 @@ impl Network {
     return a
   }
 
-  fn sgd(&mut self, mut training_data: Vec<(DVector<f32>,DVector<f32>)>, epochs:u16, mini_batch_size:usize, eta:f32,
-         test_data:Option<&[(DVector<f32>,DVector<f32>)]>) {
+  pub fn sgd(&mut self, mut training_data: Vec<(DVector<f32>,DVector<f32>)>, epochs:u16, mini_batch_size:usize,
+             eta:f32, test_data:Option<&[(DVector<f32>,DVector<f32>)]>) {
     let mut test_n =0;
     
     if test_data.is_some(){
@@ -96,6 +96,8 @@ impl Network {
     for (input,output) in mini_batch {
       let (delta_nabla_b, delta_nabla_w) = self.backprop(&input,&output);
 
+      // println!("{}", nabla_b.iter().format(","));
+      // println!("{}", delta_nabla_b.iter().format(", "));
       nabla_b = nabla_b.iter().zip(delta_nabla_b.iter()).map(|(nb,dnb)| nb+dnb).collect();
       nabla_w = nabla_w.iter().zip(delta_nabla_w.iter()).map(|(nw,dnw)| nw+dnw).collect();
     }
@@ -121,14 +123,16 @@ impl Network {
       zs.push(z);
     }
 
-    let delta:DVector<f32> = cost_derivative(&activations[self.num_layers], output) *
-      zs[self.num_layers-1].sigmoid_prime(); 
+    let delta:DVector<f32> = cost_derivative(&activations[self.num_layers], output).component_mul(
+      &zs[self.num_layers-1].sigmoid_prime()
+    );
     
     nabla_w.insert(0,delta_from_upper_layer(&delta, &activations[self.num_layers - 1]));
     deltas.insert(0,delta);
 
-    for l in (0..(self.num_layers - 2)).rev() {
+    for l in (0..=(self.num_layers - 2)).rev() {
       let sp = zs[l].sigmoid_prime();
+      //deltas[0] is the last inserted deltas, i.e. for l+1
       let delta = DVector::<f32>::from_fn(self.sizes[l], |r,c| self.weights[l+1].column(r).dot(&deltas[0])*sp[r]);
 
       nabla_w.insert(0,delta_from_upper_layer(&delta,&activations[l]));
