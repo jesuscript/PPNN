@@ -1,4 +1,4 @@
-use na::{DVector};
+use na::{DVector,DMatrix};
 use mnist::{Mnist, MnistBuilder};
 
 pub struct ImageData {
@@ -18,6 +18,7 @@ impl ImageData {
       .test_set_length(test_size)
       .finalize();
 
+    
     ImageData {
       training_size,
       test_size,
@@ -32,7 +33,8 @@ fn make_data(img: Vec<u8>, lbl: Vec<u8>,rows:usize,cols:usize) -> Vec<(DVector<f
 }
 
 fn make_datum((img, l):(&[u8], u8)) -> (DVector<f32>,DVector<f32>) {
-  let img = DVector::<f32>::from_iterator(img.len(), img.iter().map(|&i| i as f32));
+  //normalised for easier data handling
+  let img = DVector::<f32>::from_iterator(img.len(), img.iter().map(|&i|  i as f32 / 255.0 ));
   let lbl = DVector::<f32>::from_iterator(10 as usize, (0..10).enumerate().map(
     |(i,v)| if i==l as usize {1.0} else {0.0})
   );
