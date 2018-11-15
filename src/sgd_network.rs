@@ -1,10 +1,10 @@
-use std::fmt::{self,Display, Formatter};
 use std::borrow::Cow;
 use na::{DVector,Vector,Vector3,DMatrix,Dynamic,Matrix,MatrixMN};
 use rand::prelude::*;
 use rand::distributions::StandardNormal;
 use rand::{thread_rng, Rng};
 use itertools::Itertools;
+use rayon::prelude::*;
 use std::fs;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -55,9 +55,7 @@ impl Network {
     for i in 0..epochs {
       thread_rng().shuffle(&mut training_data);
 
-      for mini_batch in training_data.chunks(mini_batch_size){
-        self.update_mini_batch(&mini_batch, eta);
-      }
+      training_data.chunks(mini_batch_size).for_each(|mini_batch| self.update_mini_batch(&mini_batch, eta));
 
       if test_data.is_some(){
         println!("Epoch {}: {}/{}", i, self.evaluate(test_data.unwrap()), test_n);
@@ -72,51 +70,40 @@ impl Network {
   }
 
   pub fn evaluate(&self, test_data: &[(DVector<f32>,DVector<f32>)]) -> u32{
-    test_data.iter().fold(0, |sum, (input,output)| if self.feedforward(input).imax() == output.imax() {
+    test_data.par_iter().fold_with(0, |sum, (input,output)| if self.feedforward(input).imax() == output.imax() {
       sum+1
     } else {
       sum
-    })
+    }).reduce(|| 0, |a,b| a+b)
   }
   
   fn weighted_inputs(&self, a:&DVector<f32>, layer: usize) -> DVector<f32>{
     let (w,b) = (&self.weights[layer], &self.biases[layer]);
 
-    DVector::<f32>::from_fn(self.sizes[layer], |r, c| {
-      w.row(r).transpose().dot(&a) + b[r]
-    })
+    let wi:Vec<f32> = (0..self.sizes[layer]).map(|r| w.row(r).transpose().dot(&a) + b[r]).collect();
+
+    DVector::<f32>::from_row_slice(self.sizes[layer], &wi)
   }
-  
+
   fn feedforward(&self, input:&DVector<f32>) -> DVector<f32>{
-    //try using fold over layers
-    let mut a = self.weighted_inputs(input,0).sigmoid();
-    
-    for layer in 1..self.num_layers {
-      a = self.weighted_inputs(&a,layer).sigmoid();
-    }
-    
-    return a
+    (0..self.num_layers).fold(input.clone(), |a, l| self.weighted_inputs(&a,l).sigmoid())
   }
 
   fn update_mini_batch(&mut self, mini_batch: &[(DVector<f32>,DVector<f32>)], eta: f32){
-    let mut nabla_b = vec![];
-    let mut nabla_w = vec![];
+    let bw_zeros = (
+      (0..self.num_layers).map(|l| DVector::<f32>::zeros(self.biases[l].nrows())).collect(),
+      (0..self.num_layers).map(|l| DMatrix::<f32>::zeros(self.weights[l].nrows(), self.weights[l].ncols())).collect()
+    );
     
-    for layer in 0..self.num_layers {
-      nabla_b.push(DVector::<f32>::zeros(self.biases[layer].nrows()));
-      nabla_w.push(DMatrix::<f32>::zeros(self.weights[layer].nrows(), self.weights[layer].ncols()))
-    }
-
-    for (input,output) in mini_batch {
-      let (delta_nabla_b, delta_nabla_w) = self.backprop(&input,&output);
-
-      nabla_b = nabla_b.iter().zip(delta_nabla_b.iter()).map(|(nb,dnb)| nb+dnb).collect();
-      nabla_w = nabla_w.iter().zip(delta_nabla_w.iter()).map(|(nw,dnw)| nw+dnw).collect();
-    }
+    let (nb, nw) = mini_batch.par_iter().fold_with(bw_zeros.clone(), |a,(i,o)| {
+      add_delta(a, &self.backprop(i,o))
+    }).reduce(|| bw_zeros.clone(), |a, b|{
+      add_delta(a,&b)
+    });
 
     let k = eta/ mini_batch.len() as f32;
-    self.weights = self.weights.iter().zip(nabla_w.iter()).map(|(w,nw)| w - k*nw).collect();
-    self.biases = self.biases.iter().zip(nabla_b.iter()).map(|(b,nb)| b - k*nb).collect();
+    self.weights = self.weights.iter().zip(nw).map(|(w,nw)| w - k*nw).collect();
+    self.biases = self.biases.iter().zip(nb).map(|(b,nb)| b - k*nb).collect();
   }
 
   fn backprop(&self, input:&DVector<f32>, output:&DVector<f32>) -> (Vec<DVector<f32>>, Vec<DMatrix<f32>>) {
@@ -155,30 +142,8 @@ impl Network {
   }
 }
 
-impl Display for Network {
-  fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-    write!(f, "Network[\nlayers:{},\nsizes:{}", self.num_layers, self.sizes);
-    
-    write!(f,",\nbiases: [");
-    for c in self.biases.iter() {
-      write!(f,"{}", c);
-    }
-    write!(f,"]");
 
-    write!(f,",\nweights: [");
-    for c in self.weights.iter() { 
-      write!(f,"{}", c); //can be huge
-      
-      //write!(f, "Matrix of len: {} ", c.len());
-    }
-
-    write!(f,"]");
-    
-    write!(f,"]")
-  }
-}
-
-pub trait Sigmoid {
+trait Sigmoid {
   fn sigmoid(&self) -> Self;
   fn sigmoid_prime(&self) -> Self;
 }
@@ -205,3 +170,15 @@ fn rng() -> f32 {
   SmallRng::from_entropy().sample(StandardNormal) as f32
 }
 
+type BW = (Vec<DVector<f32>>,Vec<DMatrix<f32>>);
+
+fn add_delta<I,J>((nb,nw):(I,J), (dnb,dnw): &BW) -> BW
+  where 
+        I: IntoIterator<Item = DVector<f32>>,
+        J: IntoIterator<Item = DMatrix<f32>>
+{
+  (
+    nb.into_iter().zip(dnb.iter()).map(|(a,b)| a+b).collect(),
+    nw.into_iter().zip(dnw.iter()).map(|(a,b)| a+b).collect()
+  )
+}
