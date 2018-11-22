@@ -1,11 +1,13 @@
 use std::borrow::Cow;
 use na::{DVector,Vector,Vector3,DMatrix,Dynamic,Matrix,MatrixMN};
-use rand::prelude::*;
-use rand::distributions::StandardNormal;
-use rand::{thread_rng, Rng};
 use itertools::Itertools;
 use rayon::prelude::*;
 use std::fs;
+use rand::thread_rng;
+use rand::Rng;
+  
+use network_initializer;
+use network_initializer::NetworkInitializer;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Network {
@@ -17,17 +19,10 @@ pub struct Network {
 }
 
 impl Network {
-  pub fn new(s:&[usize]) -> Network {
+  pub fn new<I:NetworkInitializer>(s:&[usize]) -> Network  {
     let sizes = DVector::<usize>::from_row_slice(s.len() as usize, s);
+    let (biases, weights) = network_initializer::Basic::init(&sizes);
     
-    let mut biases = vec![];
-    let mut weights = vec![];
-
-    for (i, size) in sizes.iter().skip(1).enumerate() {
-      biases.push(DVector::<f32>::from_fn(*size, |r, c| rng() ));
-
-      weights.push(DMatrix::<f32>::from_fn(*size,sizes[i], |r,c| rng() ));
-    }
 
     Network{
       input_size: sizes[0],
@@ -132,7 +127,9 @@ impl Network {
 
     for l in (0..(self.num_layers - 1)).rev() {
       let sp = zs[l].sigmoid_prime();
+      
       let delta = DVector::<f32>::from_fn(self.sizes[l], |r,c| self.weights[l+1].column(r).dot(&deltas[0])*sp[r]);
+
 
       nabla_w.insert(0,make_nabla_w(&delta,&activations[l]));
       deltas.insert(0,delta);
@@ -164,10 +161,6 @@ fn make_nabla_w(delta:&DVector<f32>, a:&DVector<f32>) -> DMatrix<f32> {
 
 fn cost_derivative(out_activations:&DVector<f32>, target_out:&DVector<f32>) -> DVector<f32> {
   out_activations - target_out
-}
-
-fn rng() -> f32 {
-  SmallRng::from_entropy().sample(StandardNormal) as f32
 }
 
 type BW = (Vec<DVector<f32>>,Vec<DMatrix<f32>>);

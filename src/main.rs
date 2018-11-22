@@ -15,19 +15,21 @@ extern crate serde_json;
 use elapsed::measure_time;
 
 mod image_data;
+mod network_initializer;
 mod sgd_network;
 
 
+use network_initializer::NetworkInitializer;
 use sgd_network::{Network};
+
 
 
 fn main() {
   let image_data = image_data::ImageData::new(50_000,10_000,28,28);
-  let mut network = Network::new(&[784,30,10]);
-
+  let mut network = Network::new::<network_initializer::Basic>(&[784,30,10]);
   
   let (elapsed, _) = measure_time(|| {
-    network.sgd(image_data.training_data, 10, 100, 3.0, Some(&image_data.test_data));
+    network.sgd(image_data.training_data, 1, 10, 3.0, Some(&image_data.test_data));
   });
 
   println!("elapsed = {}", elapsed);
