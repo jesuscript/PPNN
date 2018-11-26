@@ -9,6 +9,7 @@ pub trait NetworkInitializer {
 }
 
 pub struct Basic;
+pub struct Scaled;
 
 impl NetworkInitializer for Basic {
   fn init(sizes: &DVector<usize>) -> (Vec<DVector<f32>>, Vec<DMatrix<f32>>){ 
@@ -20,7 +21,6 @@ impl NetworkInitializer for Basic {
   }
 }
 
-pub struct Scaled;
 
 impl NetworkInitializer for Scaled {
   fn init(sizes: &DVector<usize>) -> (Vec<DVector<f32>>, Vec<DMatrix<f32>>) {

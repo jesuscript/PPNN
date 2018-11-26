@@ -1,56 +1,75 @@
 use std::borrow::Cow;
-use na::{DVector,Vector,Vector3,DMatrix,Dynamic,Matrix,MatrixMN};
+use na::{DVector,DMatrix};
 use itertools::Itertools;
 use rayon::prelude::*;
 use std::fs;
 use rand::thread_rng;
 use rand::Rng;
-  
+use std::boxed::Box;
+use std::marker::PhantomData;
+
 use network_initializer;
 use network_initializer::NetworkInitializer;
+use sigmoid::Sigmoid;
+use cost_function::*;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Network {
+pub struct Network <CF: CostFunction>{
   input_size: usize,
   num_layers: usize,
   sizes: DVector<usize>,
   biases: Vec<DVector<f32>>,
-  weights: Vec<DMatrix<f32>>
+  weights: Vec<DMatrix<f32>>,
+  phantom: PhantomData<CF>,
+  eta: f32,
+  epochs: u16,
+  mini_batch_size: usize,
+  lambda: f32
 }
 
-impl Network {
-  pub fn new<I:NetworkInitializer>(s:&[usize]) -> Network  {
+impl <CF: CostFunction+std::marker::Sync> Network<CF> {
+  pub fn new<I:NetworkInitializer>(s:&[usize]) -> Network<CF> {
     let sizes = DVector::<usize>::from_row_slice(s.len() as usize, s);
-    let (biases, weights) = network_initializer::Basic::init(&sizes);
-    
+    let (biases, weights) = I::init(&sizes);
 
     Network{
       input_size: sizes[0],
       num_layers: sizes.len() - 1,
       sizes: sizes.remove_row(0),
       biases: biases,
-      weights: weights
+      weights: weights,
+      phantom: PhantomData,
+      eta: 0.0,
+      epochs: 1,
+      mini_batch_size: 1,
+      lambda: 5.0
     }
   }
 
-  pub fn new_from_file(path: &str) -> Network{
+  pub fn new_from_file(path: &str) -> Network<CF>{
     let net_json = fs::read_to_string(path).expect("Unable to read file");
 
     serde_json::from_str(&net_json).unwrap()
   }
 
 
-  pub fn sgd(&mut self, mut training_data: Vec<(DVector<f32>,DVector<f32>)>, epochs:u16, mini_batch_size:usize, eta:f32, test_data:Option<&[(DVector<f32>,DVector<f32>)]>) {
+  pub fn sgd(&mut self,
+             mut training_data: Vec<(DVector<f32>,DVector<f32>)>,
+             test_data:Option<&[(DVector<f32>,DVector<f32>)]>
+  ) {
+    assert!(self.eta > 0.0, "eta has to be greater than 0 but is {}. Use .eta(...) to set the eta.", self.eta);
+
+    let train_n = training_data.len();
+
     let mut test_n =0;
-    
     if test_data.is_some(){
       test_n = test_data.unwrap().len();
     }
     
-    for i in 0..epochs {
+    for i in 0..self.epochs {
       thread_rng().shuffle(&mut training_data);
 
-      training_data.chunks(mini_batch_size).for_each(|mini_batch| self.update_mini_batch(&mini_batch, eta));
+      training_data.chunks(self.mini_batch_size).for_each(|mini_batch| self.update_mini_batch(&mini_batch, test_n));
 
       if test_data.is_some(){
         println!("Epoch {}: {}/{}", i, self.evaluate(test_data.unwrap()), test_n);
@@ -71,7 +90,12 @@ impl Network {
       sum
     }).reduce(|| 0, |a,b| a+b)
   }
-  
+
+  pub fn eta(mut self, eta:f32) -> Self { self.eta = eta; self }
+  pub fn epochs(mut self, epochs:u16) -> Self { self.epochs = epochs; self }
+  pub fn mini_batch_size(mut self, bs:usize) -> Self { self.mini_batch_size = bs; self }
+  pub fn lambda(mut self, lambda:f32) -> Self { self.lambda = lambda; self }
+
   fn weighted_inputs(&self, a:&DVector<f32>, layer: usize) -> DVector<f32>{
     let (w,b) = (&self.weights[layer], &self.biases[layer]);
 
@@ -84,7 +108,7 @@ impl Network {
     (0..self.num_layers).fold(input.clone(), |a, l| self.weighted_inputs(&a,l).sigmoid())
   }
 
-  fn update_mini_batch(&mut self, mini_batch: &[(DVector<f32>,DVector<f32>)], eta: f32){
+  fn update_mini_batch(&mut self, mini_batch: &[(DVector<f32>,DVector<f32>)], train_len:usize){
     let bw_zeros = (
       (0..self.num_layers).map(|l| DVector::<f32>::zeros(self.biases[l].nrows())).collect(),
       (0..self.num_layers).map(|l| DMatrix::<f32>::zeros(self.weights[l].nrows(), self.weights[l].ncols())).collect()
@@ -96,8 +120,10 @@ impl Network {
       add_delta(a,&b)
     });
 
-    let k = eta/ mini_batch.len() as f32;
-    self.weights = self.weights.iter().zip(nw).map(|(w,nw)| w - k*nw).collect();
+    let k = self.eta / mini_batch.len() as f32;
+    let m = 1.0 - self.eta * self.lambda / train_len as f32;
+
+    self.weights = self.weights.iter().zip(nw).map(|(w,nw)| m*w - k*nw).collect();
     self.biases = self.biases.iter().zip(nb).map(|(b,nb)| b - k*nb).collect();
   }
 
@@ -115,15 +141,11 @@ impl Network {
       zs.push(z);
     }
     
-    let delta:DVector<f32> = cost_derivative(&activations[self.num_layers], output).component_mul(
-      &zs[self.num_layers-1].sigmoid_prime()
-    );
+    let delta:DVector<f32> = CF::delta(&activations[self.num_layers], output, &zs[self.num_layers-1]);
 
     nabla_w.insert(0,make_nabla_w(&delta, &activations[self.num_layers - 1]));
     
     deltas.insert(0,delta);
-
-    
 
     for l in (0..(self.num_layers - 1)).rev() {
       let sp = zs[l].sigmoid_prime();
@@ -140,20 +162,6 @@ impl Network {
 }
 
 
-trait Sigmoid {
-  fn sigmoid(&self) -> Self;
-  fn sigmoid_prime(&self) -> Self;
-}
-
-impl Sigmoid for f32 {
-  fn sigmoid(&self) -> f32 { 1.0 / (1.0 + std::f32::consts::E.powf(-self)) }
-  fn sigmoid_prime(&self) -> f32 { self.sigmoid() * (1.0 - self.sigmoid()) }
-}
-
-impl Sigmoid for DVector<f32> {
-  fn sigmoid(&self) -> DVector<f32> { self.map(|em| em.sigmoid()) }
-  fn sigmoid_prime(&self) -> DVector<f32> { self.map(|em| em.sigmoid_prime()) }
-}
 
 fn make_nabla_w(delta:&DVector<f32>, a:&DVector<f32>) -> DMatrix<f32> {
   DMatrix::<f32>::from_fn(delta.nrows(), a.nrows(), |r,c| delta[r] * a[c])
