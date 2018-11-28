@@ -22,18 +22,25 @@ mod sgd_network;
 
 
 use network_initializer::NetworkInitializer;
-use sgd_network::{Network};
+use sgd_network::*;
+use sgd_network::NetworkOption::*;
 use cost_function::*;
 
 
 fn main() {
   let image_data = image_data::ImageData::new(50_000,10_000,28,28);
 
-  let mut network = Network::<CrossEntropyCost>::new::<network_initializer::Scaled>(&[784,30,10])
-    .eta(0.1)
+  let mut network = Network::<CrossEntropyCost>::new::<network_initializer::Scaled>(&[784,100,10])
+    .eta(0.5)
     .epochs(30)
     .mini_batch_size(10)
-    .lambda(5.0);
+    .lambda(5.0)
+    .options(&[
+      MonitorTrainingCost,
+      MonitorTrainingAccuracy,
+      MonitorEvaluationCost,
+      MonitorEvaluationAccuracy
+    ]);
 
   
   let (elapsed, _) = measure_time(|| {

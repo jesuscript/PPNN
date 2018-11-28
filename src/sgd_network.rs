@@ -8,13 +8,12 @@ use rand::Rng;
 use std::boxed::Box;
 use std::marker::PhantomData;
 
-use network_initializer;
-use network_initializer::NetworkInitializer;
+use network_initializer::*;
 use sigmoid::Sigmoid;
 use cost_function::*;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Network <CF: CostFunction>{
+pub struct Network <CF>{
   input_size: usize,
   num_layers: usize,
   sizes: DVector<usize>,
@@ -24,10 +23,22 @@ pub struct Network <CF: CostFunction>{
   eta: f32,
   epochs: u16,
   mini_batch_size: usize,
-  lambda: f32
+  lambda: f32,
+  options: Vec<NetworkOption>
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum NetworkOption {
+  MonitorEvaluationCost,
+  MonitorEvaluationAccuracy,
+  MonitorTrainingCost,
+  MonitorTrainingAccuracy
+}
+
+type EvaluationData<'a> = Option<&'a Vec<(DVector<f32>,DVector<f32>)>>;
+
 impl <CF: CostFunction+std::marker::Sync> Network<CF> {
+  
   pub fn new<I:NetworkInitializer>(s:&[usize]) -> Network<CF> {
     let sizes = DVector::<usize>::from_row_slice(s.len() as usize, s);
     let (biases, weights) = I::init(&sizes);
@@ -42,7 +53,8 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
       eta: 0.0,
       epochs: 1,
       mini_batch_size: 1,
-      lambda: 5.0
+      lambda: 5.0,
+      options: vec![]
     }
   }
 
@@ -55,27 +67,20 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
 
   pub fn sgd(&mut self,
              mut training_data: Vec<(DVector<f32>,DVector<f32>)>,
-             test_data:Option<&[(DVector<f32>,DVector<f32>)]>
+             evaluation_data: EvaluationData
   ) {
     assert!(self.eta > 0.0, "eta has to be greater than 0 but is {}. Use .eta(...) to set the eta.", self.eta);
 
     let train_n = training_data.len();
 
-    let mut test_n =0;
-    if test_data.is_some(){
-      test_n = test_data.unwrap().len();
-    }
-    
     for i in 0..self.epochs {
       thread_rng().shuffle(&mut training_data);
 
-      training_data.chunks(self.mini_batch_size).for_each(|mini_batch| self.update_mini_batch(&mini_batch, test_n));
+      training_data.chunks(self.mini_batch_size).for_each(|mini_batch| self.update_mini_batch(&mini_batch, train_n));
 
-      if test_data.is_some(){
-        println!("Epoch {}: {}/{}", i, self.evaluate(test_data.unwrap()), test_n);
-      }else{
-        println!("Epoch {} complete", i);
-      }
+      println!("Epoch {} complete", i);
+
+      self.monitor(&training_data, &evaluation_data);
     }
   }
 
@@ -83,18 +88,39 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
     fs::write(path, serde_json::to_string(&self).unwrap()).expect("Unable to write file");
   }
 
-  pub fn evaluate(&self, test_data: &[(DVector<f32>,DVector<f32>)]) -> u32{
-    test_data.par_iter().fold_with(0, |sum, (input,output)| if self.feedforward(input).imax() == output.imax() {
-      sum+1
-    } else {
-      sum
-    }).reduce(|| 0, |a,b| a+b)
-  }
-
   pub fn eta(mut self, eta:f32) -> Self { self.eta = eta; self }
   pub fn epochs(mut self, epochs:u16) -> Self { self.epochs = epochs; self }
   pub fn mini_batch_size(mut self, bs:usize) -> Self { self.mini_batch_size = bs; self }
   pub fn lambda(mut self, lambda:f32) -> Self { self.lambda = lambda; self }
+  pub fn options(mut self, options:&[NetworkOption]) -> Self {
+    self.options = options.to_vec();
+    self
+  }
+
+  fn monitor(&self, train_data: &Vec<(DVector<f32>,DVector<f32>)>, eval_data: &EvaluationData) {
+    self.options.iter().for_each(|opt| {
+      use NetworkOption::*;
+      
+      match opt {
+        MonitorTrainingCost => println!("Cost on training data: {}", self.total_cost(train_data)),
+        MonitorTrainingAccuracy => {
+          println!("Accuracy on training data: {} / {}", self.accuracy(train_data), train_data.len())
+        },
+        MonitorEvaluationCost => {
+          assert!(eval_data.is_some(), "Evaluation data must be present for MonitorEvaluationAccuracy");
+
+          println!("Cost on evaluation data: {}", self.total_cost(eval_data.unwrap()))
+        },
+        MonitorEvaluationAccuracy => {
+          assert!(eval_data.is_some(), "Evaluation data must be present for MonitorEvaluationAccuracy");
+          
+          let data = eval_data.unwrap();
+
+          println!("Accuracy on evaluation data: {} / {}", self.accuracy(data), data.len())
+        },
+      }
+    });
+  }
 
   fn weighted_inputs(&self, a:&DVector<f32>, layer: usize) -> DVector<f32>{
     let (w,b) = (&self.weights[layer], &self.biases[layer]);
@@ -159,16 +185,30 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
 
     return (deltas,nabla_w)
   }
+
+  fn total_cost(&self, data: &Vec<(DVector<f32>,DVector<f32>)>) -> f32 {
+    let n = data.len() as f32;
+    
+    data.par_iter().fold_with(0.0, |cost, (input,output)| {
+      cost + CF::raw(&self.feedforward(input), output) / n
+    }).reduce(|| 0.0, |a,b| a+b) +
+      
+      0.5*(self.lambda/n)*self.weights.iter().map(|w| w.norm_squared()).sum::<f32>()
+  }
+
+  fn accuracy(&self, data: &[(DVector<f32>,DVector<f32>)]) -> u32 {
+    data.par_iter().fold_with(0, |sum, (input,output)| if self.feedforward(input).imax() == output.imax() {
+      sum+1
+    } else {
+      sum
+    }).reduce(|| 0, |a,b| a+b)
+  }
 }
 
 
 
 fn make_nabla_w(delta:&DVector<f32>, a:&DVector<f32>) -> DMatrix<f32> {
   DMatrix::<f32>::from_fn(delta.nrows(), a.nrows(), |r,c| delta[r] * a[c])
-}
-
-fn cost_derivative(out_activations:&DVector<f32>, target_out:&DVector<f32>) -> DVector<f32> {
-  out_activations - target_out
 }
 
 type BW = (Vec<DVector<f32>>,Vec<DMatrix<f32>>);
