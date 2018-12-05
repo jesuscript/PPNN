@@ -8,7 +8,7 @@ use rand::Rng;
 use std::boxed::Box;
 use std::marker::PhantomData;
 
-use network_initializer::*;
+use network_initializer::NetworkInitializer;
 use sigmoid::Sigmoid;
 use cost_function::*;
 
@@ -58,17 +58,12 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
     }
   }
 
-  pub fn new_from_file(path: &str) -> Network<CF>{
-    let net_json = fs::read_to_string(path).expect("Unable to read file");
-
-    serde_json::from_str(&net_json).unwrap()
-  }
 
 
   pub fn sgd(&mut self,
              mut training_data: Vec<(DVector<f32>,DVector<f32>)>,
-             evaluation_data: EvaluationData
-  ) {
+             evaluation_data: EvaluationData)
+  {
     assert!(self.eta > 0.0, "eta has to be greater than 0 but is {}. Use .eta(...) to set the eta.", self.eta);
 
     let train_n = training_data.len();
@@ -84,6 +79,12 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
     }
   }
 
+  pub fn new_from_file(path: &str) -> Network<CF>{
+    let net_json = fs::read_to_string(path).expect("Unable to read file");
+
+    serde_json::from_str(&net_json).unwrap()
+  }
+  
   pub fn save_to_file(&self, path: &str){
     fs::write(path, serde_json::to_string(&self).unwrap()).expect("Unable to write file");
   }
@@ -99,7 +100,7 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
 
   fn monitor(&self, train_data: &Vec<(DVector<f32>,DVector<f32>)>, eval_data: &EvaluationData) {
     self.options.iter().for_each(|opt| {
-      use NetworkOption::*;
+      use self::NetworkOption::*;
       
       match opt {
         MonitorTrainingCost => println!("Cost on training data: {}", self.total_cost(train_data)),
@@ -107,7 +108,7 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
           println!("Accuracy on training data: {} / {}", self.accuracy(train_data), train_data.len())
         },
         MonitorEvaluationCost => {
-          assert!(eval_data.is_some(), "Evaluation data must be present for MonitorEvaluationAccuracy");
+          assert!(eval_data.is_some(), "Evaluation data must be present for MonitorEvaluationCost");
 
           println!("Cost on evaluation data: {}", self.total_cost(eval_data.unwrap()))
         },
@@ -130,7 +131,7 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
     DVector::<f32>::from_row_slice(self.sizes[layer], &wi)
   }
 
-  fn feedforward(&self, input:&DVector<f32>) -> DVector<f32>{
+  pub fn feedforward(&self, input:&DVector<f32>) -> DVector<f32>{
     (0..self.num_layers).fold(input.clone(), |a, l| self.weighted_inputs(&a,l).sigmoid())
   }
 

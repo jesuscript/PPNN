@@ -2,3 +2,6 @@ data
 target
 .DS_Store
 Cargo.lock
+scripts/node_modules
+scripts/yarn-error.log
+scripts/yarn.lock
