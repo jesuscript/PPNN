@@ -24,11 +24,21 @@ pub struct Network <CF>{
   epochs: u16,
   mini_batch_size: usize,
   lambda: f32,
-  options: Vec<NetworkOption>
+  monitoring_options: Vec<MonitoringOption>,
+  save_stats: Option<String>
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Stats {
+  epoch: Option<u16>,
+  evaluation_cost: Option<f32>,
+  evaluation_accuracy: Option<f32>,
+  training_cost: Option<f32>,
+  training_accuracy: Option<f32>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum NetworkOption {
+pub enum MonitoringOption {
   MonitorEvaluationCost,
   MonitorEvaluationAccuracy,
   MonitorTrainingCost,
@@ -54,7 +64,8 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
       epochs: 1,
       mini_batch_size: 1,
       lambda: 5.0,
-      options: vec![]
+      monitoring_options: vec![],
+      save_stats: None
     }
   }
 
@@ -68,6 +79,8 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
 
     let train_n = training_data.len();
 
+    let mut all_stats: Vec<Stats> = vec![];
+
     for i in 0..self.epochs {
       thread_rng().shuffle(&mut training_data);
 
@@ -75,7 +88,18 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
 
       println!("Epoch {} complete", i);
 
-      self.monitor(&training_data, &evaluation_data);
+      let mut stats = self.monitor(&training_data, &evaluation_data);
+
+
+      if self.save_stats.is_some(){
+        stats.epoch = Some(i);
+        all_stats.push(stats);
+      } 
+    }
+
+    if self.save_stats.is_some(){
+      fs::write(self.save_stats.clone().unwrap(), serde_json::to_string(&all_stats).unwrap())
+        .expect("Unable to write stats to a file");
     }
   }
 
@@ -93,34 +117,65 @@ impl <CF: CostFunction+std::marker::Sync> Network<CF> {
   pub fn epochs(mut self, epochs:u16) -> Self { self.epochs = epochs; self }
   pub fn mini_batch_size(mut self, bs:usize) -> Self { self.mini_batch_size = bs; self }
   pub fn lambda(mut self, lambda:f32) -> Self { self.lambda = lambda; self }
-  pub fn options(mut self, options:&[NetworkOption]) -> Self {
-    self.options = options.to_vec();
+  pub fn monitoring_options(mut self, options:&[MonitoringOption]) -> Self {
+    self.monitoring_options = options.to_vec();
+    self
+  }
+  pub fn save_stats_to_file(mut self, path: &str) -> Self{
+    self.save_stats = Some(path.to_string());
     self
   }
 
-  fn monitor(&self, train_data: &Vec<(DVector<f32>,DVector<f32>)>, eval_data: &EvaluationData) {
-    self.options.iter().for_each(|opt| {
-      use self::NetworkOption::*;
-      
+  fn monitor(&self, train_data: &Vec<(DVector<f32>,DVector<f32>)>, eval_data: &EvaluationData) -> Stats {
+    let mut stats = Stats {
+      epoch: None,
+      evaluation_cost: None,
+      evaluation_accuracy: None,
+      training_cost: None,
+      training_accuracy: None,
+    };
+    
+    use self::MonitoringOption::*;
+    
+    self.monitoring_options.iter().for_each(|opt| {
       match opt {
-        MonitorTrainingCost => println!("Cost on training data: {}", self.total_cost(train_data)),
+        MonitorTrainingCost => {
+          let tc = self.total_cost(train_data);
+          
+          println!("Cost on training data: {}", tc);
+
+          stats.training_cost = Some(tc);
+        }, 
         MonitorTrainingAccuracy => {
-          println!("Accuracy on training data: {} / {}", self.accuracy(train_data), train_data.len())
+          let ta = self.accuracy(train_data);
+          
+          println!("Accuracy on training data: {} / {}", ta, train_data.len());
+
+          stats.training_accuracy = Some(100.0 * ta as f32 / train_data.len() as f32);
         },
         MonitorEvaluationCost => {
           assert!(eval_data.is_some(), "Evaluation data must be present for MonitorEvaluationCost");
 
-          println!("Cost on evaluation data: {}", self.total_cost(eval_data.unwrap()))
+          let ec = self.total_cost(eval_data.unwrap());
+
+          println!("Cost on evaluation data: {}", ec);
+
+          stats.evaluation_cost = Some(ec);
         },
         MonitorEvaluationAccuracy => {
           assert!(eval_data.is_some(), "Evaluation data must be present for MonitorEvaluationAccuracy");
           
           let data = eval_data.unwrap();
+          let ea = self.accuracy(data);
 
-          println!("Accuracy on evaluation data: {} / {}", self.accuracy(data), data.len())
+          println!("Accuracy on evaluation data: {} / {}", ea, data.len());
+
+          stats.evaluation_accuracy = Some(100.0 * ea as f32 / data.len() as f32);
         },
       }
     });
+
+    stats
   }
 
   fn weighted_inputs(&self, a:&DVector<f32>, layer: usize) -> DVector<f32>{

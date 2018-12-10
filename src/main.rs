@@ -25,7 +25,8 @@ mod price_prediction_scenarios;
 
 
 fn main() {
-  price_prediction_scenarios::full();
+  //price_prediction_scenarios::full();
+  image_recognition_scenarios::full();
 }
 
 
